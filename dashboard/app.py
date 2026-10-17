@@ -77,3 +77,53 @@ st.dataframe(
 st.caption(
     "Prototype only: these estimates do not establish food safety or detect pathogens."
 )
+
+
+# --- Camera-Based Food Detection ---
+from food_detector import detect_food
+
+st.divider()
+st.header("Camera-Based Food Detection")
+
+st.write(
+    "Upload a food image or capture one using your camera "
+    "to identify supported food items."
+)
+
+uploaded_file = st.file_uploader(
+    "Upload a food image",
+    type=["jpg", "jpeg", "png"],
+    key="food_image_upload",
+)
+
+camera_image = st.camera_input(
+    "Or take a picture of food",
+    key="food_camera",
+)
+
+selected_image = camera_image or uploaded_file
+
+if selected_image is not None:
+    from PIL import Image
+
+    image = Image.open(selected_image).convert("RGB")
+
+    with st.spinner("Detecting food items..."):
+        detections, annotated_image = detect_food(image)
+
+    st.subheader("Detection Result")
+    st.image(annotated_image, caption="Detected objects")
+
+    if detections:
+        st.success(f"Found {len(detections)} supported food object(s).")
+        st.dataframe(detections, use_container_width=True)
+    else:
+        st.info(
+            "No supported food items detected. "
+            "Try a clearer image with the food visible."
+        )
+
+    st.caption(
+        "Object detection does not determine whether food is fresh, "
+        "spoiled, or safe to eat."
+    )
