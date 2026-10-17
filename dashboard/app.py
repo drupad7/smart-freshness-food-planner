@@ -1,4 +1,4 @@
-
+from streamlit_autorefresh import st_autorefresh
 import sys
 from pathlib import Path
 
@@ -16,6 +16,12 @@ st.set_page_config(
     page_title="Smart Freshness System",
     page_icon="🥗",
     layout="wide",
+)
+
+st_autorefresh(
+    interval=10000,
+    limit=None,
+    key="dashboard_refresh",
 )
 
 st.title("🥗 Smart Freshness & Food Planning System")
