@@ -4,8 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>Smart Freshness Monitor</title>
+
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: Arial, sans-serif;
             max-width: 600px;
@@ -18,17 +24,38 @@
         h1 {
             font-size: 25px;
             text-align: center;
+            color: #18794e;
         }
 
         p {
             line-height: 1.5;
         }
 
-        video, img {
+        .description {
+            text-align: center;
+            color: #555;
+        }
+
+        .image-container {
             width: 100%;
+            margin-top: 15px;
+            background: #e3e8e5;
             border-radius: 12px;
+            overflow: hidden;
+        }
+
+        video,
+        img {
+            display: block;
+            width: 100%;
+            height: auto;
+            border-radius: 12px;
+        }
+
+        #camera,
+        #capturedImage,
+        #resultImage {
             margin-top: 12px;
-            background: #ddd;
         }
 
         button {
@@ -48,6 +75,10 @@
             cursor: not-allowed;
         }
 
+        #retakeButton {
+            background: #555;
+        }
+
         #status {
             margin-top: 15px;
             padding: 12px;
@@ -56,52 +87,157 @@
             overflow-wrap: anywhere;
         }
 
+        #loading {
+            margin-top: 12px;
+            padding: 14px;
+            background: #e8f5ed;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 22px;
+            height: 22px;
+            border: 3px solid #c4dfce;
+            border-top-color: #18794e;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
         .detection {
             background: white;
-            padding: 10px;
+            padding: 12px;
             margin-top: 8px;
             border-radius: 8px;
+            border-left: 4px solid #18794e;
+        }
+
+        .detection p {
+            margin-bottom: 0;
+        }
+
+        .section-title {
+            margin-top: 22px;
+            margin-bottom: 8px;
+        }
+
+        [hidden] {
+            display: none !important;
         }
     </style>
 </head>
+
 <body>
     <h1>Smart Freshness Monitor</h1>
 
-    <p>
+    <p class="description">
         Position your phone above the food box. Capture an image
         to identify supported food items using the cloud detection API.
     </p>
 
-    <video id="camera" autoplay playsinline></video>
+    <!-- Live camera -->
+    <video
+        id="camera"
+        autoplay
+        playsinline
+        muted
+    ></video>
 
-    <button id="startButton">Start Camera</button>
-    <button id="captureButton" disabled>Capture and Analyze</button>
+    <!-- Captured image shown while analysis is running -->
+    <img
+        id="capturedImage"
+        alt="Captured food image awaiting analysis"
+        hidden
+    >
 
+    <!-- Image containing detection boxes -->
+    <img
+        id="resultImage"
+        alt="Food detection results with bounding boxes"
+        hidden
+    >
+
+    <!-- Hidden canvas used to capture and resize images -->
     <canvas id="canvas" hidden></canvas>
 
+    <!-- Camera controls -->
+    <button id="startButton" type="button">
+        Start Camera
+    </button>
+
+    <button id="captureButton" type="button" disabled>
+        Capture and Analyze
+    </button>
+
+    <button id="retakeButton" type="button" hidden>
+        Retake Image
+    </button>
+
+    <!-- Status and loading indicator -->
     <div id="status" role="status" aria-live="polite">
-        Camera not started.
+        Camera not started. Tap Start Camera to begin.
     </div>
 
-    <img id="resultImage" alt="Captured image with detection boxes" hidden>
+    <div id="loading" hidden>
+        <span class="spinner"></span>
+        Analyzing your image. Please wait...
+    </div>
+
+    <!-- Detection results -->
+    <h3 class="section-title" id="resultsTitle" hidden>
+        Detection Results
+    </h3>
 
     <div id="results"></div>
 
     <script>
+        // Use the same deployed API that serves this webpage.
         const API_BASE_URL = window.location.origin;
 
         const camera = document.getElementById("camera");
+        const capturedImage = document.getElementById("capturedImage");
+        const resultImage = document.getElementById("resultImage");
         const canvas = document.getElementById("canvas");
-        const statusBox = document.getElementById("status");
+
         const startButton = document.getElementById("startButton");
         const captureButton = document.getElementById("captureButton");
-        const resultImage = document.getElementById("resultImage");
+        const retakeButton = document.getElementById("retakeButton");
+
+        const statusBox = document.getElementById("status");
+        const loading = document.getElementById("loading");
         const results = document.getElementById("results");
+        const resultsTitle = document.getElementById("resultsTitle");
 
         let cameraStream = null;
+        let capturedImageUrl = null;
+        let isAnalyzing = false;
 
+        // Start the phone's rear camera.
         startButton.addEventListener("click", async () => {
+            if (!navigator.mediaDevices ||
+                !navigator.mediaDevices.getUserMedia) {
+                statusBox.textContent =
+                    "Camera access is unavailable. Open this page using HTTPS in a supported browser.";
+                return;
+            }
+
             try {
+                startButton.disabled = true;
+                statusBox.textContent = "Starting camera...";
+
+                if (cameraStream) {
+                    cameraStream.getTracks().forEach(track => track.stop());
+                }
+
                 cameraStream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: { ideal: "environment" }
@@ -110,47 +246,115 @@
                 });
 
                 camera.srcObject = cameraStream;
+                camera.hidden = false;
+
+                capturedImage.hidden = true;
+                resultImage.hidden = true;
+                retakeButton.hidden = true;
+                loading.hidden = true;
+
                 await camera.play();
 
                 captureButton.disabled = false;
-                statusBox.textContent = "Camera ready. Position the phone and capture an image.";
+
+                statusBox.textContent =
+                    "Camera ready. Position your phone above the food and capture an image.";
+
             } catch (error) {
                 statusBox.textContent =
                     "Could not start camera: " + error.message +
-                    ". Allow camera permission and use HTTPS or localhost.";
+                    ". Allow camera permission and use HTTPS.";
+
+            } finally {
+                startButton.disabled = false;
             }
         });
 
+        // Capture an image and show it immediately.
         captureButton.addEventListener("click", async () => {
-            if (!camera.videoWidth || !camera.videoHeight) {
-                statusBox.textContent = "Please wait for the camera to initialize.";
+            if (isAnalyzing) {
                 return;
             }
 
+            if (!camera.videoWidth || !camera.videoHeight) {
+                statusBox.textContent =
+                    "Please wait for the camera to initialize.";
+                return;
+            }
+
+            isAnalyzing = true;
             captureButton.disabled = true;
+            startButton.disabled = true;
+            retakeButton.hidden = true;
+
             results.replaceChildren();
+            resultsTitle.hidden = true;
             resultImage.hidden = true;
-            statusBox.textContent = "Capturing image and analyzing food...";
+            capturedImage.hidden = true;
+            loading.hidden = true;
 
             try {
-                canvas.width = camera.videoWidth;
-                canvas.height = camera.videoHeight;
+                // Resize the image to reduce upload time.
+                const maxWidth = 640;
+                const scale = Math.min(
+                    1,
+                    maxWidth / camera.videoWidth
+                );
+
+                canvas.width = Math.round(camera.videoWidth * scale);
+                canvas.height = Math.round(camera.videoHeight * scale);
 
                 const context = canvas.getContext("2d");
-                context.drawImage(camera, 0, 0, canvas.width, canvas.height);
 
+                context.drawImage(
+                    camera,
+                    0,
+                    0,
+                    canvas.width,
+                    canvas.height
+                );
+
+                // Convert the captured frame into a JPEG.
                 const blob = await new Promise((resolve, reject) => {
                     canvas.toBlob(
-                        imageBlob => imageBlob
-                            ? resolve(imageBlob)
-                            : reject(new Error("Could not capture image.")),
+                        imageBlob => {
+                            if (imageBlob) {
+                                resolve(imageBlob);
+                            } else {
+                                reject(
+                                    new Error("Could not capture image.")
+                                );
+                            }
+                        },
                         "image/jpeg",
-                        0.85
+                        0.75
                     );
                 });
 
+                // Release the previous preview URL, if any.
+                if (capturedImageUrl) {
+                    URL.revokeObjectURL(capturedImageUrl);
+                }
+
+                // Show the captured photo before waiting for the API.
+                capturedImageUrl = URL.createObjectURL(blob);
+                capturedImage.src = capturedImageUrl;
+
+                camera.hidden = true;
+                capturedImage.hidden = false;
+
+                statusBox.textContent =
+                    "Image captured. Sending it to the cloud for analysis...";
+
+                loading.hidden = false;
+
+                // Upload the captured image to the deployed API.
                 const formData = new FormData();
-                formData.append("file", blob, "mobile_capture.jpg");
+                formData.append(
+                    "file",
+                    blob,
+                    "mobile_capture.jpg"
+                );
 
                 const response = await fetch(
                     `${API_BASE_URL}/detect-food`,
@@ -163,24 +367,36 @@
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.detail || "Food detection failed.");
+                    throw new Error(
+                        data.detail || "Food detection failed."
+                    );
+                }
+
+                loading.hidden = true;
+
+                // Display the annotated image returned by the API.
+                if (data.annotated_image) {
+                    resultImage.src =
+                        "data:image/jpeg;base64," +
+                        data.annotated_image;
+
+                    resultImage.hidden = false;
+                    capturedImage.hidden = true;
                 }
 
                 statusBox.textContent =
                     `Analysis complete. ${data.detection_count} food object(s) detected.`;
 
-                if (data.annotated_image) {
-                    resultImage.src =
-                        "data:image/jpeg;base64," + data.annotated_image;
-                    resultImage.hidden = false;
-                }
+                resultsTitle.hidden = false;
 
-                if (data.detections.length === 0) {
+                // Display a message if no supported food was detected.
+                if (!data.detections || data.detections.length === 0) {
                     results.textContent =
-                        "No supported food objects were detected.";
+                        "No supported food objects were detected. Try better lighting or move the phone closer.";
                 }
 
-                data.detections.forEach(item => {
+                // Display each detected food and confidence score.
+                (data.detections || []).forEach(item => {
                     const card = document.createElement("div");
                     card.className = "detection";
 
@@ -190,28 +406,65 @@
                     const confidence = document.createElement("p");
                     confidence.textContent =
                         "Confidence: " +
-                        (item.confidence * 100).toFixed(1) + "%";
+                        (item.confidence * 100).toFixed(1) +
+                        "%";
 
                     card.append(name, confidence);
                     results.appendChild(card);
                 });
 
+                // Explain what the detector can and cannot determine.
                 const note = document.createElement("p");
                 note.textContent =
-                    "Note: Object detection identifies food categories; " +
-                    "it does not determine freshness or food safety.";
+                    "Note: Food object detection identifies supported food categories. It does not determine freshness or food safety.";
+
                 results.appendChild(note);
 
+                retakeButton.hidden = false;
+
             } catch (error) {
-                statusBox.textContent = "Error: " + error.message;
+                loading.hidden = true;
+
+                statusBox.textContent =
+                    "Analysis failed: " + error.message;
+
+                // Keep the captured image visible so the user can inspect it.
+                camera.hidden = true;
+                capturedImage.hidden = !capturedImageUrl;
+
+                retakeButton.hidden = false;
+
             } finally {
+                isAnalyzing = false;
                 captureButton.disabled = false;
+                startButton.disabled = false;
             }
         });
 
+        // Return to the live camera for another capture.
+        retakeButton.addEventListener("click", () => {
+            capturedImage.hidden = true;
+            resultImage.hidden = true;
+            loading.hidden = true;
+            camera.hidden = false;
+
+            results.replaceChildren();
+            resultsTitle.hidden = true;
+
+            statusBox.textContent =
+                "Camera ready. Capture another image when you are ready.";
+
+            retakeButton.hidden = true;
+        });
+
+        // Stop the camera when leaving the webpage.
         window.addEventListener("beforeunload", () => {
             if (cameraStream) {
                 cameraStream.getTracks().forEach(track => track.stop());
+            }
+
+            if (capturedImageUrl) {
+                URL.revokeObjectURL(capturedImageUrl);
             }
         });
     </script>
