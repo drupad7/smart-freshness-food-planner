@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+streamlit
+streamlit-autorefresh
+pydantic
+psycopg[binary]
+python-dotenv
+python-multipart
+ultralytics
+opencv-python
+pandas
+numpy
+Pillow
+pytest
+httpx
