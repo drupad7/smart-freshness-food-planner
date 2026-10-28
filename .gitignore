@@ -32,3 +32,9 @@ Thumbs.db
 
 # Local logs
 *.log
+
+# Local ML model weights
+yolo11n.pt
+
+# Generated food detection output
+food_detection_result.jpg
