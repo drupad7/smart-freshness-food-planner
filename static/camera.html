@@ -1,0 +1,219 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Freshness Monitor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f4f7f5;
+            color: #222;
+        }
+
+        h1 {
+            font-size: 25px;
+            text-align: center;
+        }
+
+        p {
+            line-height: 1.5;
+        }
+
+        video, img {
+            width: 100%;
+            border-radius: 12px;
+            margin-top: 12px;
+            background: #ddd;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            margin-top: 12px;
+            border: none;
+            border-radius: 8px;
+            background: #18794e;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        #status {
+            margin-top: 15px;
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            overflow-wrap: anywhere;
+        }
+
+        .detection {
+            background: white;
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Smart Freshness Monitor</h1>
+
+    <p>
+        Position your phone above the food box. Capture an image
+        to identify supported food items using the cloud detection API.
+    </p>
+
+    <video id="camera" autoplay playsinline></video>
+
+    <button id="startButton">Start Camera</button>
+    <button id="captureButton" disabled>Capture and Analyze</button>
+
+    <canvas id="canvas" hidden></canvas>
+
+    <div id="status" role="status" aria-live="polite">
+        Camera not started.
+    </div>
+
+    <img id="resultImage" alt="Captured image with detection boxes" hidden>
+
+    <div id="results"></div>
+
+    <script>
+        const API_BASE_URL = window.location.origin;
+
+        const camera = document.getElementById("camera");
+        const canvas = document.getElementById("canvas");
+        const statusBox = document.getElementById("status");
+        const startButton = document.getElementById("startButton");
+        const captureButton = document.getElementById("captureButton");
+        const resultImage = document.getElementById("resultImage");
+        const results = document.getElementById("results");
+
+        let cameraStream = null;
+
+        startButton.addEventListener("click", async () => {
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: "environment" }
+                    },
+                    audio: false
+                });
+
+                camera.srcObject = cameraStream;
+                await camera.play();
+
+                captureButton.disabled = false;
+                statusBox.textContent = "Camera ready. Position the phone and capture an image.";
+            } catch (error) {
+                statusBox.textContent =
+                    "Could not start camera: " + error.message +
+                    ". Allow camera permission and use HTTPS or localhost.";
+            }
+        });
+
+        captureButton.addEventListener("click", async () => {
+            if (!camera.videoWidth || !camera.videoHeight) {
+                statusBox.textContent = "Please wait for the camera to initialize.";
+                return;
+            }
+
+            captureButton.disabled = true;
+            results.replaceChildren();
+            resultImage.hidden = true;
+            statusBox.textContent = "Capturing image and analyzing food...";
+
+            try {
+                canvas.width = camera.videoWidth;
+                canvas.height = camera.videoHeight;
+
+                const context = canvas.getContext("2d");
+                context.drawImage(camera, 0, 0, canvas.width, canvas.height);
+
+                const blob = await new Promise((resolve, reject) => {
+                    canvas.toBlob(
+                        imageBlob => imageBlob
+                            ? resolve(imageBlob)
+                            : reject(new Error("Could not capture image.")),
+                        "image/jpeg",
+                        0.85
+                    );
+                });
+
+                const formData = new FormData();
+                formData.append("file", blob, "mobile_capture.jpg");
+
+                const response = await fetch(
+                    `${API_BASE_URL}/detect-food`,
+                    {
+                        method: "POST",
+                        body: formData
+                    }
+                );
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "Food detection failed.");
+                }
+
+                statusBox.textContent =
+                    `Analysis complete. ${data.detection_count} food object(s) detected.`;
+
+                if (data.annotated_image) {
+                    resultImage.src =
+                        "data:image/jpeg;base64," + data.annotated_image;
+                    resultImage.hidden = false;
+                }
+
+                if (data.detections.length === 0) {
+                    results.textContent =
+                        "No supported food objects were detected.";
+                }
+
+                data.detections.forEach(item => {
+                    const card = document.createElement("div");
+                    card.className = "detection";
+
+                    const name = document.createElement("strong");
+                    name.textContent = item.food;
+
+                    const confidence = document.createElement("p");
+                    confidence.textContent =
+                        "Confidence: " +
+                        (item.confidence * 100).toFixed(1) + "%";
+
+                    card.append(name, confidence);
+                    results.appendChild(card);
+                });
+
+                const note = document.createElement("p");
+                note.textContent =
+                    "Note: Object detection identifies food categories; " +
+                    "it does not determine freshness or food safety.";
+                results.appendChild(note);
+
+            } catch (error) {
+                statusBox.textContent = "Error: " + error.message;
+            } finally {
+                captureButton.disabled = false;
+            }
+        });
+
+        window.addEventListener("beforeunload", () => {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
