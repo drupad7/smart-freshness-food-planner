@@ -9,6 +9,9 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+
+import os
+import requests
 from database import get_readings
 from freshness_analyzer import analyze_freshness
 
@@ -27,16 +30,26 @@ st_autorefresh(
 st.title("🥗 Smart Freshness & Food Planning System")
 st.caption("Environmental monitoring and prototype freshness estimates")
 
+API_BASE_URL = os.getenv("API_BASE_URL", "").rstrip("/")
+
 try:
-    readings = get_readings(limit=100)
+    if API_BASE_URL:
+        response = requests.get(
+            f"{API_BASE_URL}/readings",
+            params={"limit": 100},
+            timeout=15,
+        )
+        response.raise_for_status()
+        readings = response.json()["readings"]
+    else:
+        readings = get_readings(limit=100)
+
+except (requests.RequestException, ValueError, KeyError) as exc:
+    st.error(f"Could not load sensor readings: {exc}")
+    st.stop()
 except Exception as exc:
     st.error(f"Could not load sensor readings: {exc}")
     st.stop()
-
-if not readings:
-    st.info("No sensor readings yet. Run `python sensor_service.py` to collect one.")
-    st.stop()
-
 df = pd.DataFrame(readings)
 
 # Add the freshness classification for each reading.
