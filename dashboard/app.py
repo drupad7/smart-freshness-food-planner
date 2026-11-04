@@ -52,6 +52,13 @@ except Exception as exc:
     st.stop()
 df = pd.DataFrame(readings)
 
+if df.empty:
+    st.info(
+        "No sensor readings available yet. "
+        "Connect your ESP32 or generate a simulated reading."
+    )
+    st.stop()
+
 # Add the freshness classification for each reading.
 df["freshness_status"] = df.apply(
     lambda row: analyze_freshness(row.to_dict())["freshness_status"],
@@ -92,15 +99,16 @@ st.caption(
 )
 
 
+
 # --- Camera-Based Food Detection ---
 from food_detector import detect_food
 
 st.divider()
-st.header("Camera-Based Food Detection")
+st.header("📸 Fresho Vision — Food Freshness Detection")
 
 st.write(
-    "Upload a food image or capture one using your camera "
-    "to identify supported food items."
+    "Identify food items and estimate the visual freshness "
+    "of supported fruits: apples, bananas and oranges."
 )
 
 uploaded_file = st.file_uploader(
@@ -121,22 +129,62 @@ if selected_image is not None:
 
     image = Image.open(selected_image).convert("RGB")
 
-    with st.spinner("Detecting food items..."):
+    with st.spinner("Fresho is analyzing your food..."):
         detections, annotated_image = detect_food(image)
 
     st.subheader("Detection Result")
-    st.image(annotated_image, caption="Detected objects")
+    st.image(
+        annotated_image,
+        caption="YOLO food detection",
+        use_container_width=True,
+    )
 
     if detections:
-        st.success(f"Found {len(detections)} supported food object(s).")
-        st.dataframe(detections, use_container_width=True)
+        st.success(f"Detected {len(detections)} food object(s).")
+
+        for index, detection in enumerate(detections, start=1):
+            food = detection["food"].capitalize()
+            yolo_confidence = detection["confidence"]
+            freshness = detection.get("freshness")
+
+            with st.container(border=True):
+                st.markdown(f"### {index}. {food}")
+
+                col1, col2 = st.columns(2)
+
+                col1.metric(
+                    "Food detection confidence",
+                    f"{yolo_confidence * 100:.1f}%"
+                )
+
+                if freshness:
+                    status = freshness["freshness"]
+                    confidence = freshness["confidence"]
+
+                    col2.metric(
+                        "Visual freshness",
+                        status
+                    )
+
+                    st.progress(confidence)
+
+                    st.caption(
+                        f"Freshness model confidence: "
+                        f"{confidence * 100:.1f}%"
+                    )
+                else:
+                    col2.metric(
+                        "Visual freshness",
+                        "Not supported"
+                    )
+
+        st.caption(
+            "Freshness predictions are experimental visual estimates. "
+            "They do not establish food safety or detect pathogens."
+        )
+
     else:
         st.info(
             "No supported food items detected. "
             "Try a clearer image with the food visible."
         )
-
-    st.caption(
-        "Object detection does not determine whether food is fresh, "
-        "spoiled, or safe to eat."
-    )
